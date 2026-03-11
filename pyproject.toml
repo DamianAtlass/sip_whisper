@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 requires = [ "setuptools>=61.2" ]
 
 [project]
-name = "openai-whisper"
+name = "sip-openai-whisper"
 description = "Robust Speech Recognition via Large-Scale Weak Supervision"
 readme.content-type = "text/markdown"
 readme.file = "README.md"
@@ -35,11 +35,11 @@ urls = { Homepage = "https://github.com/openai/whisper" }
 scripts.whisper = "whisper.transcribe:cli"
 
 [tool.setuptools]
-py-modules = [ "whisper" ]
+py-modules = [ "sip_whisper" ]
 include-package-data = true
 
 [tool.setuptools.dynamic]
-version = { attr = "whisper.version.__version__" }
+version = { attr = "sip_whisper.version.__version__" }
 
 [tool.setuptools.packages.find]
 exclude = [ "tests*" ]

@@ -1,7 +1,7 @@
 import pytest
 
-from whisper.normalizers import EnglishTextNormalizer
-from whisper.normalizers.english import (
+from sip_whisper.normalizers import EnglishTextNormalizer
+from sip_whisper.normalizers.english import (
     EnglishNumberNormalizer,
     EnglishSpellingNormalizer,
 )

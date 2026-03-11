@@ -112,12 +112,12 @@ def load_model(
     Parameters
     ----------
     name : str
-        one of the official model names listed by `whisper.available_models()`, or
+        one of the official model names listed by `sip_whisper.available_models()`, or
         path to a model checkpoint containing the model dimensions and the model state_dict.
     device : Union[str, torch.device]
         the PyTorch device to put the model into
     download_root: str
-        path to download the model files; by default, it uses "~/.cache/whisper"
+        path to download the model files; by default, it uses "~/.cache/sip_whisper"
     in_memory: bool
         whether to preload the model weights into host memory
 
@@ -131,7 +131,7 @@ def load_model(
         device = "cuda" if torch.cuda.is_available() else "cpu"
     if download_root is None:
         default = os.path.join(os.path.expanduser("~"), ".cache")
-        download_root = os.path.join(os.getenv("XDG_CACHE_HOME", default), "whisper")
+        download_root = os.path.join(os.getenv("XDG_CACHE_HOME", default), "sip_whisper")
 
     if name in _MODELS:
         checkpoint_file = _download(_MODELS[name], download_root, in_memory)

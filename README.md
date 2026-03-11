@@ -82,7 +82,7 @@ Whisper's performance varies widely depending on the language. The figure below 
 The following command will transcribe speech in audio files, using the `turbo` model:
 
 ```bash
-whisper audio.flac audio.mp3 audio.wav --model turbo
+sip_whisper audio.flac audio.mp3 audio.wav --model turbo
 ```
 
 The default setting (which selects the `turbo` model) works well for transcribing English. However, **the `turbo` model is not trained for translation tasks**. If you need to **translate non-English speech into English**, use one of the **multilingual models** (`tiny`, `base`, `small`, `medium`, `large`) instead of `turbo`. 
@@ -90,13 +90,13 @@ The default setting (which selects the `turbo` model) works well for transcribin
 For example, to transcribe an audio file containing non-English speech, you can specify the language:
 
 ```bash
-whisper japanese.wav --language Japanese
+sip_whisper japanese.wav --language Japanese
 ```
 
 To **translate** speech into English, use:
 
 ```bash
-whisper japanese.wav --model medium --language Japanese --task translate
+sip_whisper japanese.wav --model medium --language Japanese --task translate
 ```
 
 > **Note:** The `turbo` model will return the original language even if `--task translate` is specified. Use `medium` or `large` for the best translation results.
@@ -104,7 +104,7 @@ whisper japanese.wav --model medium --language Japanese --task translate
 Run the following to view all available options:
 
 ```bash
-whisper --help
+sip_whisper --help
 ```
 
 See [tokenizer.py](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py) for the list of all available languages.
@@ -112,12 +112,12 @@ See [tokenizer.py](https://github.com/openai/whisper/blob/main/whisper/tokenizer
 
 ## Python usage
 
-Transcription can also be performed within Python: 
+Transcription can also be performed within Python:
 
 ```python
-import whisper
+import sip_whisper
 
-model = whisper.load_model("turbo")
+model = sip_whisper.load_model("turbo")
 result = model.transcribe("audio.mp3")
 print(result["text"])
 ```
@@ -127,24 +127,24 @@ Internally, the `transcribe()` method reads the entire file and processes the au
 Below is an example usage of `whisper.detect_language()` and `whisper.decode()` which provide lower-level access to the model.
 
 ```python
-import whisper
+import sip_whisper
 
-model = whisper.load_model("turbo")
+model = sip_whisper.load_model("turbo")
 
 # load audio and pad/trim it to fit 30 seconds
-audio = whisper.load_audio("audio.mp3")
-audio = whisper.pad_or_trim(audio)
+audio = sip_whisper.load_audio("audio.mp3")
+audio = sip_whisper.pad_or_trim(audio)
 
 # make log-Mel spectrogram and move to the same device as the model
-mel = whisper.log_mel_spectrogram(audio, n_mels=model.dims.n_mels).to(model.device)
+mel = sip_whisper.log_mel_spectrogram(audio, n_mels=model.dims.n_mels).to(model.device)
 
 # detect the spoken language
 _, probs = model.detect_language(mel)
 print(f"Detected language: {max(probs, key=probs.get)}")
 
 # decode the audio
-options = whisper.DecodingOptions()
-result = whisper.decode(model, mel, options)
+options = sip_whisper.DecodingOptions()
+result = sip_whisper.decode(model, mel, options)
 
 # print the recognized text
 print(result.text)
