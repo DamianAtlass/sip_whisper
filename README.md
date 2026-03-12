@@ -1,3 +1,32 @@
+# Whisper for Speech Intelligibility Prediciton
+This repository was forked from [OpenAI's Whisper](https://github.com/openai/whisper)
+
+## Structural changes:
+To keep the modules compatible, this package needed to be renamed to avoid conflicts:
+*name = "openai-whisper"* in project.toml -> name = "sip-openai-whisper"
+
+Additionally, the *whisper/* directory needed to be renamed for compatibility. Doing this with pycharm offers refactoring which is sufficient to install this and the original module in parallel.
+
+## Installation
+Checkout sip_whisper:
+
+    cd some_directory
+    git clone git@github.com:DamianAtlass/sip_whisper.git
+
+Install sip_whisper in your virtual environment and enable real time adjustments to the code to be directly applied to the imported module:
+
+    cd your_project
+    . .venv/bin/activate
+    pip install -e some_directory/sip_whisper/
+
+Validate installation:
+
+    pip show sip-openai-whisper
+
+Everything below is part of the original README.md .
+
+___
+
 # Whisper
 
 [[Blog]](https://openai.com/blog/whisper)
