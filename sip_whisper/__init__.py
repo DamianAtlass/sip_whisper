@@ -106,6 +106,7 @@ def load_model(
     download_root: str = None,
     in_memory: bool = False,
 ) -> Whisper:
+    print("Load sip-whisper model.")
     """
     Load a Whisper ASR model
 
