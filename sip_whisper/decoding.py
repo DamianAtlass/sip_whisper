@@ -14,6 +14,59 @@ from .utils import compression_ratio
 if TYPE_CHECKING:
     from .model import Whisper
 
+import os
+import pickle
+
+
+def extract_correct_logprobs(
+        logprobs: list[torch.Tensor],
+        source_indices: list[list],
+        prev_hypo_of_final_selection: int,
+        tokens_len: int
+    ) -> None:
+    """
+    Extract the correct logprobs for all hypotheses in the logprobs list.
+
+    Parameters
+    ----------
+    logprobs : list[torch.Tensor], shape of items = (vocab_size, beam_size), length = max number of tokens in hypotheses
+        all logprobs for all hypotheses
+
+    source_indices : list[list], length of item = beam_size, length = max number of tokens in hypotheses
+        denotes the predecessors of each hypothesis
+
+    prev_hypo_of_final_selection : int
+        predecessing hypothesis of the final, selected set of tokens
+
+    tokens_len : int
+        length of the final, selected set of tokens
+
+    Returns
+    -------
+    TODO
+
+    """
+
+    idx = prev_hypo_of_final_selection
+    indices = []
+    for i in reversed(range(tokens_len)):
+
+        idx = source_indices[i][idx]
+        indices.append(idx)
+
+    indices = indices[::-1]
+    print(indices)
+    result = None
+    for i in range(tokens_len):
+        idx = indices[i]
+
+        if result == None:
+            result = logprobs[i][idx][:, None]
+        else:
+            result = torch.hstack([result, logprobs[i][idx][:, None]])
+
+    print(result.shape)
+
 
 @torch.no_grad()
 def detect_language(
@@ -340,6 +393,12 @@ class BeamSearchDecoder(TokenDecoder):
         self.max_candidates: int = round(beam_size * self.patience)
         self.finished_sequences = None
 
+        self.bundle = {
+            "logprobs": [],
+            "source_indices": [],
+            "prev_hypo": {},
+        }
+
         assert (
             self.max_candidates > 0
         ), f"Invalid beam size ({beam_size}) or patience ({patience})"
@@ -348,7 +407,7 @@ class BeamSearchDecoder(TokenDecoder):
         self.finished_sequences = None
 
     def update(
-        self, tokens: Tensor, logits: Tensor, sum_logprobs: Tensor
+        self, tokens: Tensor, logits: Tensor, sum_logprobs: Tensor, step: int = None
     ) -> Tuple[Tensor, bool]:
         if tokens.shape[0] % self.beam_size != 0:
             raise ValueError(f"{tokens.shape}[0] % {self.beam_size} != 0")
@@ -377,6 +436,7 @@ class BeamSearchDecoder(TokenDecoder):
             for sequence in sorted(scores, key=scores.get, reverse=True):
                 if sequence[-1] == self.eot:
                     finished[sequence] = scores[sequence]
+                    self.bundle["prev_hypo"][sequence] = sources[sequence]
                 else:
                     sum_logprobs[len(next_tokens)] = scores[sequence]
                     next_tokens.append(sequence)
@@ -390,6 +450,9 @@ class BeamSearchDecoder(TokenDecoder):
 
         tokens = torch.tensor(next_tokens, device=tokens.device)
         self.inference.rearrange_kv_cache(source_indices)
+
+        self.bundle["logprobs"].append(logits)
+        self.bundle["source_indices"].append(source_indices)
 
         # add newly finished sequences to self.finished_sequences
         assert len(self.finished_sequences) == len(finished_sequences)
@@ -788,7 +851,7 @@ class DecodingTask:
                     logit_filter.apply(logits, tokens)
 
                 # expand the tokens tensor with the selected next tokens
-                tokens, completed = self.decoder.update(tokens, logits, sum_logprobs)
+                tokens, completed = self.decoder.update(tokens, logits, sum_logprobs, step=i)
 
                 if completed or tokens.shape[-1] > self.n_ctx:
                     break
@@ -839,10 +902,21 @@ class DecodingTask:
             for s in tokens
         ]
 
+        # list() is necessary to avoid iterating over keys while changing them
+        for v in list(self.decoder.bundle["prev_hypo"].keys()):
+            new_key = v[self.sample_begin:v.index(tokenizer.eot)]
+            self.decoder.bundle["prev_hypo"][new_key] = self.decoder.bundle["prev_hypo"].pop(v)
+
         # select the top-ranked sample in each group
         selected = self.sequence_ranker.rank(tokens, sum_logprobs)
         tokens: List[List[int]] = [t[i].tolist() for i, t in zip(selected, tokens)]
         texts: List[str] = [tokenizer.decode(t).strip() for t in tokens]
+
+        prev_hypo_of_final_selection = self.decoder.bundle["prev_hypo"][tuple(*tokens)]
+        extract_correct_logprobs(self.decoder.bundle["logprobs"],
+                                 self.decoder.bundle["source_indices"],
+                                 prev_hypo_of_final_selection,
+                                 len(tokens[0]))
 
         sum_logprobs: List[float] = [lp[i] for i, lp in zip(selected, sum_logprobs)]
         avg_logprobs: List[float] = [
