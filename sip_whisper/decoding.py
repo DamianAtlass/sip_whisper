@@ -15,14 +15,14 @@ if TYPE_CHECKING:
     from .model import Whisper
 
 import os
-import pickle
 
 
 def extract_correct_logprobs(
         logprobs: list[torch.Tensor],
         source_indices: list[list],
         prev_hypo_of_final_selection: int,
-        tokens_len: int
+        final_token_sequence: List[List[int]],
+        hypotheses_per_step: List[torch.Tensor]
     ) -> None:
     """
     Extract the correct logprobs for all hypotheses in the logprobs list.
@@ -38,8 +38,11 @@ def extract_correct_logprobs(
     prev_hypo_of_final_selection : int
         predecessing hypothesis of the final, selected set of tokens
 
-    tokens_len : int
-        length of the final, selected set of tokens
+    final_token_sequence : List[List[int]]
+        final output of beam search: a list of tokens, used for validation
+
+    hypotheses_per_step : List[torch.Tensor]
+        collection of all hypotheses for each step, used for validation
 
     Returns
     -------
@@ -47,17 +50,28 @@ def extract_correct_logprobs(
 
     """
 
+    if len(final_token_sequence) > 1:
+        raise NotImplementedError()
+    final_token_sequence = final_token_sequence[0]
+
     idx = prev_hypo_of_final_selection
     indices = []
-    for i in reversed(range(tokens_len)):
+    for i in reversed(range(len(final_token_sequence))):
 
         idx = source_indices[i][idx]
         indices.append(idx)
 
     indices = indices[::-1]
-    print(indices)
+    indices = indices.copy()
+    indices.append(prev_hypo_of_final_selection)
+    indices = indices[1:]
+
+    # check if
+    expected_final_token_sequence = [hypotheses_per_step[i][r][-1].item() for i,r in enumerate(indices)]
+    assert final_token_sequence == expected_final_token_sequence, "Finding right logprobs might be faulty!"
+
     result = None
-    for i in range(tokens_len):
+    for i in range(len(final_token_sequence)):
         idx = indices[i]
 
         if result == None:
@@ -66,6 +80,10 @@ def extract_correct_logprobs(
             result = torch.hstack([result, logprobs[i][idx][:, None]])
 
     print(result.shape)
+    if not os.path.isdir("output"):
+        os.mkdir("output")
+    length = len(os.listdir("output"))
+    torch.save(result ,os.path.join("output",f"logprobs_{length}.pt"))
 
 
 @torch.no_grad()
@@ -397,6 +415,7 @@ class BeamSearchDecoder(TokenDecoder):
             "logprobs": [],
             "source_indices": [],
             "prev_hypo": {},
+            "tokens": [], #only for testing
         }
 
         assert (
@@ -417,6 +436,7 @@ class BeamSearchDecoder(TokenDecoder):
             self.finished_sequences = [{} for _ in range(n_audio)]
 
         logprobs = F.log_softmax(logits.float(), dim=-1)
+        self.bundle["logprobs"].append(logprobs)
         next_tokens, source_indices, finished_sequences = [], [], []
         for i in range(n_audio):
             scores, sources, finished = {}, {}, {}
@@ -448,11 +468,12 @@ class BeamSearchDecoder(TokenDecoder):
 
             finished_sequences.append(finished)
 
-        tokens = torch.tensor(next_tokens, device=tokens.device)
-        self.inference.rearrange_kv_cache(source_indices)
-
-        self.bundle["logprobs"].append(logits)
         self.bundle["source_indices"].append(source_indices)
+
+        tokens = torch.tensor(next_tokens, device=tokens.device)
+        self.bundle["tokens"].append(tokens)
+
+        self.inference.rearrange_kv_cache(source_indices)
 
         # add newly finished sequences to self.finished_sequences
         assert len(self.finished_sequences) == len(finished_sequences)
@@ -916,7 +937,8 @@ class DecodingTask:
         extract_correct_logprobs(self.decoder.bundle["logprobs"],
                                  self.decoder.bundle["source_indices"],
                                  prev_hypo_of_final_selection,
-                                 len(tokens[0]))
+                                 tokens,
+                                 self.decoder.bundle["tokens"])
 
         sum_logprobs: List[float] = [lp[i] for i, lp in zip(selected, sum_logprobs)]
         avg_logprobs: List[float] = [
