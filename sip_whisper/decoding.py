@@ -22,10 +22,11 @@ def extract_correct_logprobs(
         source_indices: list[list],
         prev_hypo_of_final_selection: int,
         final_token_sequence: List[List[int]],
-        hypotheses_per_step: List[torch.Tensor]
+        hypotheses_per_step: List[torch.Tensor],
+        logprobs_per_partial_sequence
     ) -> None:
     """
-    Extract the correct logprobs for all hypotheses in the logprobs list.
+    Extract the correct logprobs for all hypotheses in the logprobs list and write them to disk.
 
     Parameters
     ----------
@@ -44,16 +45,20 @@ def extract_correct_logprobs(
     hypotheses_per_step : List[torch.Tensor]
         collection of all hypotheses for each step, used for validation
 
+    logprobs_per_partial_sequence : dict
+        a dict with partial sequences as keys and logprobs as values
+
     Returns
     -------
     TODO
 
     """
 
-    if len(final_token_sequence) > 1:
+    if len(final_token_sequence) > 1: # multiple audio files / arrays
         raise NotImplementedError()
     final_token_sequence = final_token_sequence[0]
 
+    # method 1
     idx = prev_hypo_of_final_selection
     indices = []
     for i in reversed(range(len(final_token_sequence))):
@@ -62,28 +67,38 @@ def extract_correct_logprobs(
         indices.append(idx)
 
     indices = indices[::-1]
-    indices = indices.copy()
     indices.append(prev_hypo_of_final_selection)
-    indices = indices[1:]
 
     # check if
-    expected_final_token_sequence = [hypotheses_per_step[i][r][-1].item() for i,r in enumerate(indices)]
-    assert final_token_sequence == expected_final_token_sequence, "Finding right logprobs might be faulty!"
+    expected_final_token_sequence = [hypotheses_per_step[i][r][-1].item() for i,r in enumerate(indices[1:])]
+    assert final_token_sequence == expected_final_token_sequence, "Finding right logprobs with method 1 might be faulty!"
 
     result = None
     for i in range(len(final_token_sequence)):
         idx = indices[i]
 
         if result == None:
-            result = logprobs[i][idx][:, None]
+            result = logprobs[i][idx][None, :]
         else:
-            result = torch.hstack([result, logprobs[i][idx][:, None]])
+            result = torch.vstack([result, logprobs[i][idx][None, :]])
 
-    print(result.shape)
+    # method 2
+    result2 = None
+    for o in range(1, len(final_token_sequence) + 1):
+        part_seq = final_token_sequence[:o]
+        log_prob = logprobs_per_partial_sequence[tuple(part_seq)]
+        if result2 == None:
+            result2 = log_prob[None, :]
+        else:
+            result2 = torch.vstack([result2, log_prob[None, :]])
+
+
+    assert torch.equal(result, result2), "Results are not equal"
+
     if not os.path.isdir("output"):
         os.mkdir("output")
     length = len(os.listdir("output"))
-    torch.save(result ,os.path.join("output",f"logprobs_{length}.pt"))
+    #torch.save(result, os.path.join("output", f"logprobs_{length}.pt"))
 
 
 @torch.no_grad()
@@ -416,6 +431,7 @@ class BeamSearchDecoder(TokenDecoder):
             "source_indices": [],
             "prev_hypo": {},
             "tokens": [], #only for testing
+            "logprobs_per_partial_sequence": {}
         }
 
         assert (
@@ -426,7 +442,7 @@ class BeamSearchDecoder(TokenDecoder):
         self.finished_sequences = None
 
     def update(
-        self, tokens: Tensor, logits: Tensor, sum_logprobs: Tensor, step: int = None
+        self, tokens: Tensor, logits: Tensor, sum_logprobs: Tensor, step: int = None, sample_begin = None
     ) -> Tuple[Tensor, bool]:
         if tokens.shape[0] % self.beam_size != 0:
             raise ValueError(f"{tokens.shape}[0] % {self.beam_size} != 0")
@@ -454,9 +470,11 @@ class BeamSearchDecoder(TokenDecoder):
             # STEP 2: rank the candidates and keep the top beam_size sequences for each audio
             saved = 0
             for sequence in sorted(scores, key=scores.get, reverse=True):
+                self.bundle["logprobs_per_partial_sequence"][sequence[sample_begin:]] = logprobs[sources[sequence]]
                 if sequence[-1] == self.eot:
                     finished[sequence] = scores[sequence]
                     self.bundle["prev_hypo"][sequence] = sources[sequence]
+
                 else:
                     sum_logprobs[len(next_tokens)] = scores[sequence]
                     next_tokens.append(sequence)
@@ -849,7 +867,7 @@ class DecodingTask:
 
         return languages, lang_probs
 
-    def _main_loop(self, audio_features: Tensor, tokens: Tensor):
+    def _main_loop(self, audio_features: Tensor, tokens: Tensor, sample_begin):
         n_batch = tokens.shape[0]
         sum_logprobs: Tensor = torch.zeros(n_batch, device=audio_features.device)
         no_speech_probs = [np.nan] * n_batch
@@ -872,7 +890,7 @@ class DecodingTask:
                     logit_filter.apply(logits, tokens)
 
                 # expand the tokens tensor with the selected next tokens
-                tokens, completed = self.decoder.update(tokens, logits, sum_logprobs, step=i)
+                tokens, completed = self.decoder.update(tokens, logits, sum_logprobs, step=i, sample_begin=sample_begin)
 
                 if completed or tokens.shape[-1] > self.n_ctx:
                     break
@@ -906,7 +924,7 @@ class DecodingTask:
         tokens = tokens.repeat_interleave(self.n_group, dim=0).to(audio_features.device)
 
         # call the main sampling loop
-        tokens, sum_logprobs, no_speech_probs = self._main_loop(audio_features, tokens)
+        tokens, sum_logprobs, no_speech_probs = self._main_loop(audio_features, tokens, self.sample_begin)
 
         # reshape the tensors to have (n_audio, n_group) as the first two dimensions
         audio_features = audio_features[:: self.n_group]
@@ -938,7 +956,9 @@ class DecodingTask:
                                  self.decoder.bundle["source_indices"],
                                  prev_hypo_of_final_selection,
                                  tokens,
-                                 self.decoder.bundle["tokens"])
+                                 self.decoder.bundle["tokens"],
+                                 self.decoder.bundle["logprobs_per_partial_sequence"],
+                                 )
 
         sum_logprobs: List[float] = [lp[i] for i, lp in zip(selected, sum_logprobs)]
         avg_logprobs: List[float] = [
