@@ -16,6 +16,9 @@ if TYPE_CHECKING:
 
 import os
 
+import logging
+logger = logging.getLogger(__name__)
+
 
 def extract_correct_logprobs(
         logprobs: list[torch.Tensor],
