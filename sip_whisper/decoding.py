@@ -50,7 +50,7 @@ def extract_correct_logprobs(
 
     Returns
     -------
-    TODO
+    None
 
     """
 
@@ -69,7 +69,6 @@ def extract_correct_logprobs(
     indices = indices[::-1]
     indices.append(prev_hypo_of_final_selection)
 
-    # check if
     expected_final_token_sequence = [hypotheses_per_step[i][r][-1].item() for i,r in enumerate(indices[1:])]
     assert final_token_sequence == expected_final_token_sequence, "Finding right logprobs with method 1 might be faulty!"
 
@@ -95,10 +94,7 @@ def extract_correct_logprobs(
 
     assert torch.equal(result, result2), "Results are not equal"
 
-    if not os.path.isdir("output"):
-        os.mkdir("output")
-    length = len(os.listdir("output"))
-    #torch.save(result, os.path.join("output", f"logprobs_{length}.pt"))
+    torch.save(result2, "tmp.pt")
 
 
 @torch.no_grad()
@@ -452,7 +448,7 @@ class BeamSearchDecoder(TokenDecoder):
             self.finished_sequences = [{} for _ in range(n_audio)]
 
         logprobs = F.log_softmax(logits.float(), dim=-1)
-        self.bundle["logprobs"].append(logprobs)
+        self.bundle["logprobs"].append(logprobs) #method 1, save logprobs of each partial sequence for later
         next_tokens, source_indices, finished_sequences = [], [], []
         for i in range(n_audio):
             scores, sources, finished = {}, {}, {}
@@ -470,10 +466,10 @@ class BeamSearchDecoder(TokenDecoder):
             # STEP 2: rank the candidates and keep the top beam_size sequences for each audio
             saved = 0
             for sequence in sorted(scores, key=scores.get, reverse=True):
-                self.bundle["logprobs_per_partial_sequence"][sequence[sample_begin:]] = logprobs[sources[sequence]]
+                self.bundle["logprobs_per_partial_sequence"][sequence[sample_begin:]] = logprobs[sources[sequence]] #method 2, save logporbs for each partial sequence
                 if sequence[-1] == self.eot:
                     finished[sequence] = scores[sequence]
-                    self.bundle["prev_hypo"][sequence] = sources[sequence]
+                    self.bundle["prev_hypo"][sequence] = sources[sequence] # method 1, remember parent of a finished sequence
 
                 else:
                     sum_logprobs[len(next_tokens)] = scores[sequence]
@@ -486,10 +482,10 @@ class BeamSearchDecoder(TokenDecoder):
 
             finished_sequences.append(finished)
 
-        self.bundle["source_indices"].append(source_indices)
+        self.bundle["source_indices"].append(source_indices) # method 1, remember which new hypo stems from which old hypo
 
         tokens = torch.tensor(next_tokens, device=tokens.device)
-        self.bundle["tokens"].append(tokens)
+        self.bundle["tokens"].append(tokens) # method 1
 
         self.inference.rearrange_kv_cache(source_indices)
 
@@ -942,6 +938,7 @@ class DecodingTask:
         ]
 
         # list() is necessary to avoid iterating over keys while changing them
+        # cut token list as done above
         for v in list(self.decoder.bundle["prev_hypo"].keys()):
             new_key = v[self.sample_begin:v.index(tokenizer.eot)]
             self.decoder.bundle["prev_hypo"][new_key] = self.decoder.bundle["prev_hypo"].pop(v)

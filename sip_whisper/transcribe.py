@@ -507,10 +507,15 @@ def transcribe(
             # update progress bar
             pbar.update(min(content_frames, seek) - previous_seek)
 
+
+    extracted_logprobs = torch.load("tmp.pt")
+    os.remove("tmp.pt")
+
     return dict(
         text=tokenizer.decode(all_tokens[len(initial_prompt_tokens) :]),
         segments=all_segments,
         language=language,
+        extracted_logprobs = extracted_logprobs
     )
 
 
