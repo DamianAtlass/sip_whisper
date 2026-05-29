@@ -56,23 +56,62 @@ def extract_correct_logprobs(
     None
 
     """
-
-    if len(final_token_sequence) > 1: # multiple audio files / arrays
+    if len(final_token_sequence) > 1:  # multiple audio files / arrays
         raise NotImplementedError()
     final_token_sequence = final_token_sequence[0]
+
+    # method doesn't work if an unfinished sequence was chosen later as best sequence. keep for now, might not be worth fixing
+    if prev_hypo_of_final_selection:
+        result1 = method_1(logprobs, source_indices, prev_hypo_of_final_selection, final_token_sequence, hypotheses_per_step)
+
+    result2 = method_2(final_token_sequence, logprobs_per_partial_sequence)
+
+    if prev_hypo_of_final_selection:
+        assert torch.equal(result1, result2), "Results are not equal"
+
+    torch.save(result2, "tmp.pt")
+
+    # backtracking
+def method_1(logprobs: list[torch.Tensor],
+            source_indices: list[list],
+            prev_hypo_of_final_selection: int,
+            final_token_sequence: List[int],
+            hypotheses_per_step: List[torch.Tensor]) -> torch.Tensor:
+    """
+    Find the final sequence throw backtrackingby going from the final sequence back to the beginning. Find and return select the logprobs accordingly afterword.
+
+        Parameters
+    ----------
+    logprobs : list[torch.Tensor], shape of items = (vocab_size, beam_size), length = max number of tokens in hypotheses
+        all logprobs for all hypotheses
+
+    source_indices : list[list], length of item = beam_size, length = max number of tokens in hypotheses
+        denotes the predecessors of each hypothesis
+
+    prev_hypo_of_final_selection : int
+        predecessing hypothesis of the final, selected set of tokens
+
+    final_token_sequence : List[List[int]]
+        final output of beam search: a list of tokens, used for validation
+
+    hypotheses_per_step : List[torch.Tensor]
+        collection of all hypotheses for each step, used for validation
+
+    Returns:
+        torch.Tensor
+    """
 
     # method 1
     idx = prev_hypo_of_final_selection
     indices = []
     for i in reversed(range(len(final_token_sequence))):
-
         idx = source_indices[i][idx]
         indices.append(idx)
 
     indices = indices[::-1]
     indices.append(prev_hypo_of_final_selection)
 
-    expected_final_token_sequence = [hypotheses_per_step[i][r][-1].item() for i,r in enumerate(indices[1:])]
+    expected_final_token_sequence = [hypotheses_per_step[i][r][-1].item() for i, r in enumerate(indices[1:])]
     assert final_token_sequence == expected_final_token_sequence, "Finding right logprobs with method 1 might be faulty!"
 
     result = None
@@ -84,21 +123,33 @@ def extract_correct_logprobs(
         else:
             result = torch.vstack([result, logprobs[i][idx][None, :]])
 
-    # method 2
-    result2 = None
+    return result
+
+def method_2(final_token_sequence: List[int], logprobs_per_partial_sequence) -> torch.Tensor:
+    """
+    Find the final sequence throw backtrackingby going from the final sequence back to the beginning. Find and return select the logprobs accordingly afterword.
+
+        Parameters
+    ----------
+    final_token_sequence : List[List[int]]
+        final output of beam search: a list of tokens, used for validation
+
+    logprobs_per_partial_sequence : dict
+        a dict with partial sequences as keys and logprobs as values
+
+    Returns:
+        torch.Tensor
+    """
+
+    result = None
     for o in range(1, len(final_token_sequence) + 1):
         part_seq = final_token_sequence[:o]
         log_prob = logprobs_per_partial_sequence[tuple(part_seq)]
-        if result2 == None:
-            result2 = log_prob[None, :]
+        if result == None:
+            result = log_prob[None, :]
         else:
-            result2 = torch.vstack([result2, log_prob[None, :]])
-
-
-    assert torch.equal(result, result2), "Results are not equal"
-
-    torch.save(result2, "tmp.pt")
-
+            result = torch.vstack([result, log_prob[None, :]])
+    return result
 
 @torch.no_grad()
 def detect_language(
@@ -951,7 +1002,7 @@ class DecodingTask:
         tokens: List[List[int]] = [t[i].tolist() for i, t in zip(selected, tokens)]
         texts: List[str] = [tokenizer.decode(t).strip() for t in tokens]
 
-        prev_hypo_of_final_selection = self.decoder.bundle["prev_hypo"][tuple(*tokens)]
+        prev_hypo_of_final_selection: int | None = self.decoder.bundle["prev_hypo"].get(tuple(*tokens), None)
         extract_correct_logprobs(self.decoder.bundle["logprobs"],
                                  self.decoder.bundle["source_indices"],
                                  prev_hypo_of_final_selection,
