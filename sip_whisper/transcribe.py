@@ -34,6 +34,7 @@ from .utils import (
 if TYPE_CHECKING:
     from .model import Whisper
 
+from typing import Any
 
 def transcribe(
     model: "Whisper",
@@ -181,7 +182,7 @@ def transcribe(
     if word_timestamps and task == "translate":
         warnings.warn("Word-level timestamps on translations may not be reliable.")
 
-    def decode_with_fallback(segment: torch.Tensor) -> DecodingResult:
+    def decode_with_fallback(segment: torch.Tensor) -> tuple[DecodingResult, Any]:
         temperatures = (
             [temperature] if isinstance(temperature, (int, float)) else temperature
         )
@@ -198,7 +199,7 @@ def transcribe(
                 kwargs.pop("best_of", None)
 
             options = DecodingOptions(**kwargs, temperature=t)
-            decode_result = model.decode(segment, options)
+            decode_result, sip_result_ = model.decode(segment, options)
 
             needs_fallback = False
             if (
@@ -221,7 +222,7 @@ def transcribe(
             if not needs_fallback:
                 break
 
-        return decode_result
+        return decode_result, sip_result_
 
     clip_idx = 0
     seek = seek_clips[clip_idx][0]
@@ -292,7 +293,7 @@ def transcribe(
             else:
                 decode_options["prompt"] = all_tokens[prompt_reset_since:]
 
-            result: DecodingResult = decode_with_fallback(mel_segment)
+            result, sip_result = decode_with_fallback(mel_segment)
             tokens = torch.tensor(result.tokens)
 
             if no_speech_threshold is not None:
@@ -508,14 +509,11 @@ def transcribe(
             pbar.update(min(content_frames, seek) - previous_seek)
 
 
-    extracted_logprobs = torch.load("tmp.pt")
-    os.remove("tmp.pt")
-
     return dict(
         text=tokenizer.decode(all_tokens[len(initial_prompt_tokens) :]),
         segments=all_segments,
         language=language,
-        extracted_logprobs = extracted_logprobs
+        extracted_logprobs = sip_result
     )
 
 

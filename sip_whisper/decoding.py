@@ -18,6 +18,7 @@ import os
 
 import logging
 logger = logging.getLogger(__name__)
+from typing import Any
 
 
 def extract_correct_logprobs(
@@ -27,7 +28,7 @@ def extract_correct_logprobs(
         final_token_sequence: List[List[int]],
         hypotheses_per_step: List[torch.Tensor],
         logprobs_per_partial_sequence
-    ) -> None:
+    ) -> Any:
     """
     Extract the correct logprobs for all hypotheses in the logprobs list and write them to disk.
 
@@ -69,7 +70,7 @@ def extract_correct_logprobs(
     if prev_hypo_of_final_selection:
         assert torch.equal(result1, result2), "Results are not equal"
 
-    torch.save(result2, "tmp.pt")
+    return result2
 
     # backtracking
 def method_1(logprobs: list[torch.Tensor],
@@ -950,7 +951,7 @@ class DecodingTask:
         return tokens, sum_logprobs, no_speech_probs
 
     @torch.no_grad()
-    def run(self, mel: Tensor) -> List[DecodingResult]:
+    def run(self, mel: Tensor) -> Tuple[List[DecodingResult], Any]:
         self.decoder.reset()
         tokenizer: Tokenizer = self.tokenizer
         n_audio: int = mel.shape[0]
@@ -968,7 +969,7 @@ class DecodingTask:
                 for features, language, probs in zip(
                     audio_features, languages, language_probs
                 )
-            ]
+            ], None
 
         # repeat text tensors by the group size, for beam search or best-of-n sampling
         tokens = tokens.repeat_interleave(self.n_group, dim=0).to(audio_features.device)
@@ -1003,7 +1004,7 @@ class DecodingTask:
         texts: List[str] = [tokenizer.decode(t).strip() for t in tokens]
 
         prev_hypo_of_final_selection: int | None = self.decoder.bundle["prev_hypo"].get(tuple(*tokens), None)
-        extract_correct_logprobs(self.decoder.bundle["logprobs"],
+        sip_result = extract_correct_logprobs(self.decoder.bundle["logprobs"],
                                  self.decoder.bundle["source_indices"],
                                  prev_hypo_of_final_selection,
                                  tokens,
@@ -1041,7 +1042,7 @@ class DecodingTask:
             for text, language, tokens, features, avg_logprob, no_speech_prob in zip(
                 *fields
             )
-        ]
+        ], sip_result
 
 
 @torch.no_grad()
@@ -1050,7 +1051,7 @@ def decode(
     mel: Tensor,
     options: DecodingOptions = DecodingOptions(),
     **kwargs,
-) -> Union[DecodingResult, List[DecodingResult]]:
+) -> Tuple[Union[DecodingResult, List[DecodingResult]], Any]:
     """
     Performs decoding of 30-second audio segment(s), provided as Mel spectrogram(s).
 
@@ -1076,6 +1077,6 @@ def decode(
     if kwargs:
         options = replace(options, **kwargs)
 
-    result = DecodingTask(model, options).run(mel)
+    result, sip_result = DecodingTask(model, options).run(mel)
 
-    return result[0] if single else result
+    return (result[0], sip_result) if single else (result, sip_result)
