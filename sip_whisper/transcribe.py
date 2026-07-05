@@ -311,7 +311,6 @@ def transcribe(
                     seek += segment_size  # fast-forward to the next segment boundary
                     continue
 
-            sip_result_list.append(sip_result)
             previous_seek = seek
             current_segments = []
 
@@ -484,12 +483,17 @@ def transcribe(
                     line = f"[{format_timestamp(start)} --> {format_timestamp(end)}] {text}"
                     print(make_safe(line))
 
+            segment_is_empty = False
             # if a segment is instantaneous or does not contain text, clear it
             for i, segment in enumerate(current_segments):
                 if segment["start"] == segment["end"] or segment["text"].strip() == "":
                     segment["text"] = ""
                     segment["tokens"] = []
                     segment["words"] = []
+                    segment_is_empty = True
+
+            if not segment_is_empty:
+                sip_result_list.append(sip_result)
 
             all_segments.extend(
                 [
@@ -515,7 +519,7 @@ def transcribe(
         text=tokenizer.decode(all_tokens[len(initial_prompt_tokens) :]),
         segments=all_segments,
         language=language,
-        extracted_logprobs = sip_result
+        extracted_logprobs = torch.vstack(sip_result_list)
     )
 
 

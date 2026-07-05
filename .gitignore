@@ -9,3 +9,6 @@ thumbs.db
 .DS_Store
 .idea
 
+/.venv/
+/tests/tensor_sample_audio_small.mp3.pt
+/tests/tensor_testfile.wav.pt
