@@ -55,6 +55,8 @@ def test_dtw(N: int, M: int):
 @pytest.mark.requires_cuda
 @pytest.mark.parametrize("N, M", sizes)
 def test_dtw_cuda_equivalence(N: int, M: int):
+    if not torch.cuda.is_available():
+        pytest.skip("GPU not available")
     x_numpy = np.random.randn(N, M).astype(np.float32)
     x_cuda = torch.from_numpy(x_numpy).cuda()
 

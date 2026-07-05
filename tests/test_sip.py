@@ -50,11 +50,11 @@ def test_compare_sip_whisper_with_original(file_path):
                                       condition_on_previous_text=False)
     assert result_1 == result_2
 
-@pytest.mark.parametrize(("file_path", "result_tensor"), [
-    ("tests/sample_audio_small.mp3", "tests/sip_result_sample_audio_small.mp3_.pt"),
-    ("tests/testfile.wav", "tests/sip_result_testfile.wav_.pt"),
+@pytest.mark.parametrize(("file_path", "tensor_hash"), [
+    ("tests/sample_audio_small.mp3", 9288928181056700416),
+    ("tests/testfile.wav", 9205786229373665280),
     ])
-def test_consistency(file_path, result_tensor):
+def test_consistency(file_path, tensor_hash: int):
     #sip_whisper
     model = sip_whisper.load_model("tiny", device="cpu")
     audio = sip_whisper.load_audio(file_path, 16_000)
@@ -68,7 +68,9 @@ def test_consistency(file_path, result_tensor):
                                       word_timestamps=True,
                                       condition_on_previous_text=False)
     sip_result = result.pop("extracted_logprobs")
-    assert torch.equal(sip_result, torch.load(result_tensor))
+    #tokens = [x for s in result["segments"] for x in s["tokens"]]
+    #wip
+    assert torch.hash_tensor(sip_result).item() == tensor_hash
 
 
 def test_mixing_functions():

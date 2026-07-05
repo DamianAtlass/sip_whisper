@@ -261,6 +261,7 @@ def transcribe(
             "no_speech_prob": result.no_speech_prob,
         }
 
+    sip_result_list = []
     # show the progress bar when verbose is False (if True, transcribed text will be printed)
     with tqdm.tqdm(
         total=content_frames, unit="frames", disable=verbose is not False
@@ -310,6 +311,7 @@ def transcribe(
                     seek += segment_size  # fast-forward to the next segment boundary
                     continue
 
+            sip_result_list.append(sip_result)
             previous_seek = seek
             current_segments = []
 
