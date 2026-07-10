@@ -483,17 +483,23 @@ def transcribe(
                     line = f"[{format_timestamp(start)} --> {format_timestamp(end)}] {text}"
                     print(make_safe(line))
 
-            segment_is_empty = False
+            # position of the first token (of the current segment) in the list of all tokens of all segments
+            pos_first_token_seg = 0
+            columns_to_delete = torch.zeros(len(sip_result), dtype=torch.bool)
+
             # if a segment is instantaneous or does not contain text, clear it
             for i, segment in enumerate(current_segments):
+                seg_len=len(segment["tokens"])
                 if segment["start"] == segment["end"] or segment["text"].strip() == "":
                     segment["text"] = ""
                     segment["tokens"] = []
                     segment["words"] = []
-                    segment_is_empty = True
+                    columns_to_delete[pos_first_token_seg:pos_first_token_seg+seg_len] = True
+                pos_first_token_seg+=seg_len
 
-            if not segment_is_empty:
-                sip_result_list.append(sip_result)
+            sip_result = sip_result[~columns_to_delete]
+            assert np.sum([len(s["tokens"]) for s in current_segments]) == len(sip_result)
+            sip_result_list.append(sip_result)
 
             all_segments.extend(
                 [
@@ -519,7 +525,7 @@ def transcribe(
         text=tokenizer.decode(all_tokens[len(initial_prompt_tokens) :]),
         segments=all_segments,
         language=language,
-        extracted_logprobs = torch.vstack(sip_result_list)
+        extracted_logprobs = torch.vstack(sip_result_list) if sip_result_list else None
     )
 
 
