@@ -520,12 +520,16 @@ def transcribe(
             # update progress bar
             pbar.update(min(content_frames, seek) - previous_seek)
 
+    decoded_tokens_with_timestamps: list = [tokenizer.decode_with_timestamps([a]) for a in all_tokens[len(initial_prompt_tokens) :]]
+    extracted_logprobs: torch.Tensor | None = torch.vstack(sip_result_list) if sip_result_list else None
 
+    assert len(decoded_tokens_with_timestamps) == (0 if extracted_logprobs is None else len(extracted_logprobs))
     return dict(
         text=tokenizer.decode(all_tokens[len(initial_prompt_tokens) :]),
         segments=all_segments,
         language=language,
-        extracted_logprobs = torch.vstack(sip_result_list) if sip_result_list else None
+        extracted_logprobs = extracted_logprobs,
+        decoded_tokens_with_timestamps = decoded_tokens_with_timestamps,
     )
 
 
