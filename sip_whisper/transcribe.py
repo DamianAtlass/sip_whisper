@@ -53,7 +53,9 @@ def transcribe(
     append_punctuations: str = "\"'.。,，!！?？:：”)]}、",
     clip_timestamps: Union[str, List[float]] = "0",
     hallucination_silence_threshold: Optional[float] = None,
+    break_after_first_segment: bool = False,
     **decode_options,
+
 ):
     """
     Transcribe an audio file using Whisper
@@ -236,6 +238,10 @@ def transcribe(
     all_segments = []
     prompt_reset_since = 0
 
+    first_segment = False
+    if break_after_first_segment:
+        print("Will break after first segment.")
+
     remaining_prompt_length = model.dims.n_text_ctx // 2 - 1
     if initial_prompt is not None:
         initial_prompt_tokens = tokenizer.encode(" " + initial_prompt.strip())
@@ -280,6 +286,9 @@ def transcribe(
                 if clip_idx < len(seek_clips):
                     seek = seek_clips[clip_idx][0]
                 continue
+            if break_after_first_segment and first_segment:
+                break
+            first_segment = True
             time_offset = float(seek * HOP_LENGTH / SAMPLE_RATE)
             window_end_time = float((seek + N_FRAMES) * HOP_LENGTH / SAMPLE_RATE)
             segment_size = min(N_FRAMES, content_frames - seek, seek_clip_end - seek)
