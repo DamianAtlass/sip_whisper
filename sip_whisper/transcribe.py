@@ -268,6 +268,7 @@ def transcribe(
         }
 
     sip_result_list = []
+    interation_counter = 0
     # show the progress bar when verbose is False (if True, transcribed text will be printed)
     with tqdm.tqdm(
         total=content_frames, unit="frames", disable=verbose is not False
@@ -288,6 +289,7 @@ def transcribe(
                 continue
             if break_after_first_segment and first_segment:
                 break
+            interation_counter += 1
             first_segment = True
             time_offset = float(seek * HOP_LENGTH / SAMPLE_RATE)
             window_end_time = float((seek + N_FRAMES) * HOP_LENGTH / SAMPLE_RATE)
@@ -350,6 +352,8 @@ def transcribe(
             timestamp_tokens: torch.Tensor = tokens.ge(tokenizer.timestamp_begin)
             single_timestamp_ending = timestamp_tokens[-2:].tolist() == [False, True]
 
+            columns_to_keep = torch.zeros(len(tokens), dtype=torch.bool)
+
             consecutive = torch.where(timestamp_tokens[:-1] & timestamp_tokens[1:])[0]
             consecutive.add_(1)
             if len(consecutive) > 0:
@@ -361,6 +365,7 @@ def transcribe(
                 last_slice = 0
                 for current_slice in slices:
                     sliced_tokens = tokens[last_slice:current_slice]
+                    columns_to_keep[last_slice:current_slice] = 1
                     start_timestamp_pos = (
                         sliced_tokens[0].item() - tokenizer.timestamp_begin
                     )
@@ -398,7 +403,7 @@ def transcribe(
                         timestamps[-1].item() - tokenizer.timestamp_begin
                     )
                     duration = last_timestamp_pos * time_precision
-
+                columns_to_keep[:] = 1
                 current_segments.append(
                     new_segment(
                         start=time_offset,
@@ -506,7 +511,7 @@ def transcribe(
                     columns_to_delete[pos_first_token_seg:pos_first_token_seg+seg_len] = True
                 pos_first_token_seg+=seg_len
 
-            sip_result = sip_result[~columns_to_delete]
+            sip_result = sip_result[columns_to_keep & ~columns_to_delete]
             assert np.sum([len(s["tokens"]) for s in current_segments]) == len(sip_result)
             sip_result_list.append(sip_result)
 
