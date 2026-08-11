@@ -274,14 +274,14 @@ class Tokenizer:
 
         return tuple(sorted(result))
 
-    def split_to_word_tokens(self, tokens: List[int]):
+    def split_to_word_tokens(self, tokens: List[int], subword_timestamps: bool = False):
         if self.language in {"zh", "ja", "th", "lo", "my", "yue"}:
             # These languages don't typically use spaces, so it is difficult to split words
             # without morpheme analysis. Here, we instead split words at any
             # position where the tokens are decoded as valid unicode points
             return self.split_tokens_on_unicode(tokens)
 
-        return self.split_tokens_on_spaces(tokens)
+        return self.split_tokens_on_spaces(tokens, subword_timestamps=subword_timestamps)
 
     def split_tokens_on_unicode(self, tokens: List[int]):
         decoded_full = self.decode_with_timestamps(tokens)
@@ -308,8 +308,12 @@ class Tokenizer:
 
         return words, word_tokens
 
-    def split_tokens_on_spaces(self, tokens: List[int]):
+    def split_tokens_on_spaces(self, tokens: List[int], subword_timestamps: bool = False):
         subwords, subword_tokens_list = self.split_tokens_on_unicode(tokens)
+        if subword_timestamps:
+            # dont combine subwords into words!
+            return subwords, subword_tokens_list
+
         words = []
         word_tokens = []
 

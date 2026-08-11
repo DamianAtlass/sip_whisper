@@ -54,6 +54,7 @@ def transcribe(
     clip_timestamps: Union[str, List[float]] = "0",
     hallucination_silence_threshold: Optional[float] = None,
     break_after_first_segment: bool = False,
+    subword_timestamps: bool = False,
     **decode_options,
 
 ):
@@ -239,8 +240,6 @@ def transcribe(
     prompt_reset_since = 0
 
     first_segment = False
-    if break_after_first_segment:
-        print("Will break after first segment.")
 
     remaining_prompt_length = model.dims.n_text_ctx // 2 - 1
     if initial_prompt is not None:
@@ -424,6 +423,7 @@ def transcribe(
                     prepend_punctuations=prepend_punctuations,
                     append_punctuations=append_punctuations,
                     last_speech_timestamp=last_speech_timestamp,
+                    subword_timestamps=subword_timestamps,
                 )
 
                 if not single_timestamp_ending:

@@ -169,6 +169,7 @@ def find_alignment(
     *,
     medfilt_width: int = 7,
     qk_scale: float = 1.0,
+    subword_timestamps: bool = False,
 ) -> List[WordTiming]:
     if len(text_tokens) == 0:
         return []
@@ -214,8 +215,10 @@ def find_alignment(
     matrix = weights.mean(axis=0)
     matrix = matrix[len(tokenizer.sot_sequence) : -1]
     text_indices, time_indices = dtw(-matrix)
+    words, word_tokens = tokenizer.split_to_word_tokens(text_tokens + [tokenizer.eot], subword_timestamps=subword_timestamps)
 
-    words, word_tokens = tokenizer.split_to_word_tokens(text_tokens + [tokenizer.eot])
+    if subword_timestamps:
+        assert len(text_tokens) == len(word_tokens)-1
     if len(word_tokens) <= 1:
         # return on eot only
         # >>> np.pad([], (1, 0))
@@ -286,6 +289,7 @@ def add_word_timestamps(
     prepend_punctuations: str = "\"'“¿([{-",
     append_punctuations: str = "\"'.。,，!！?？:：”)]}、",
     last_speech_timestamp: float,
+    subword_timestamps: bool = False,
     **kwargs,
 ):
     if len(segments) == 0:
@@ -297,7 +301,8 @@ def add_word_timestamps(
     ]
 
     text_tokens = list(itertools.chain.from_iterable(text_tokens_per_segment))
-    alignment = find_alignment(model, tokenizer, text_tokens, mel, num_frames, **kwargs)
+    alignment = find_alignment(model, tokenizer, text_tokens, mel, num_frames, subword_timestamps=subword_timestamps, **kwargs)
+    word_tokens = [a.tokens for a in alignment] # delete this line
     word_durations = np.array([t.end - t.start for t in alignment])
     word_durations = word_durations[word_durations.nonzero()]
     median_duration = np.median(word_durations) if len(word_durations) > 0 else 0.0
@@ -316,7 +321,8 @@ def add_word_timestamps(
                 elif alignment[i - 1].word in sentence_end_marks:
                     alignment[i].start = alignment[i].end - max_duration
 
-    merge_punctuations(alignment, prepend_punctuations, append_punctuations)
+    if not subword_timestamps:
+        merge_punctuations(alignment, prepend_punctuations, append_punctuations)
 
     time_offset = segments[0]["seek"] * HOP_LENGTH / SAMPLE_RATE
     word_index = 0
@@ -335,6 +341,7 @@ def add_word_timestamps(
                         start=round(time_offset + timing.start, 2),
                         end=round(time_offset + timing.end, 2),
                         probability=timing.probability,
+                        tokens=timing.tokens,
                     )
                 )
 

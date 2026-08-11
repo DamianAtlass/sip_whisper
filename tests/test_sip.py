@@ -152,8 +152,30 @@ def test_difficult_audio():
                                     beam_size=5,
                                     temperature=0,
                                     word_timestamps=True,
-                                    condition_on_previous_text=False
+                                    condition_on_previous_text=False,
                                     )
     print(result)
 
+@pytest.mark.parametrize(("subword_timestamps", "expected_length"), [
+    (False, 9),
+    (True, 10)])
+def test_subword_timestamps(subword_timestamps, expected_length):
+    model = sip_whisper.load_model("base", device=torch.device("cuda"))
+    audio_path = Path.cwd() / "tests" / "s29_bgwszp.wav"
+    audio = sip_whisper.load_audio(str(audio_path))
+    audio = sip_whisper.pad_or_trim(audio)
 
+    options = {
+        "model": model,
+        "audio": audio,
+        "fp16": False,
+        "beam_size": 5,
+        "temperature": 0,
+        "word_timestamps": True,
+        "condition_on_previous_text": False,
+        "language": "en",
+        "subword_timestamps": subword_timestamps,
+    }
+    result = sip_whisper.transcribe(**options)
+    len(result["segments"][0]["words"]) == expected_length
+    print()
