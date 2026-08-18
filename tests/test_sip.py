@@ -193,3 +193,26 @@ def test_subword_timestamps(subword_timestamps, expected_length):
     result = sip_whisper.transcribe(**options)
     assert len(result["segments"][0]["words"]) == expected_length
     print()
+
+def test_greedy_decoder():
+    model = sip_whisper.load_model("base", device=torch.device("cuda"))
+    audio_path = Path.cwd() / "tests" / "s29_bgwszp.wav"
+    audio = sip_whisper.load_audio(str(audio_path))
+    audio = sip_whisper.pad_or_trim(audio)
+
+    options = {
+        "model": model,
+        "audio": audio,
+        "fp16": False,
+        "beam_size": 5, # <- useless parameter
+        "temperature": 0.25, # temperature activates the greedy decoder and renderen 'beam_size' useless
+        "extract_logprobs": True,
+        "word_timestamps": False,
+        "condition_on_previous_text": False,
+        "language": "en",
+        "subword_timestamps": True,
+    }
+    result = sip_whisper.transcribe(**options)
+    # note: len(result['decoded_tokens_with_timestamps']) is now varying due to temperature
+    assert isinstance(result["extracted_logprobs"], torch.Tensor)
+    assert len(result['extracted_logprobs']) == len(result["decoded_tokens_with_timestamps"])
