@@ -53,6 +53,7 @@ def transcribe(
     append_punctuations: str = "\"'.。,，!！?？:：”)]}、",
     clip_timestamps: Union[str, List[float]] = "0",
     hallucination_silence_threshold: Optional[float] = None,
+    extract_logprobs: bool = False,
     break_after_first_segment: bool = False,
     subword_timestamps: bool = False,
     **decode_options,
@@ -538,13 +539,18 @@ def transcribe(
     extracted_logprobs: torch.Tensor | None = torch.vstack(sip_result_list) if sip_result_list else None
 
     assert len(decoded_tokens_with_timestamps) == (0 if extracted_logprobs is None else len(extracted_logprobs))
-    return dict(
+
+    transcription_result: dict = dict(
         text=tokenizer.decode(all_tokens[len(initial_prompt_tokens) :]),
         segments=all_segments,
         language=language,
-        extracted_logprobs = extracted_logprobs,
         decoded_tokens_with_timestamps = decoded_tokens_with_timestamps,
     )
+
+    if extract_logprobs:
+        transcription_result.update(dict(extracted_logprobs = extracted_logprobs))
+
+    return transcription_result
 
 
 def cli():

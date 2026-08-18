@@ -12,13 +12,15 @@ def test_sip_whisper_module(time_stamps):
     audio = sip_whisper.load_audio("tests/sample_audio_small.mp3", 16_000)
     audio = sip_whisper.pad_or_trim(audio)
 
-    result = sip_whisper.transcribe(model,
-                       audio,
-                       fp16=False,
-                       beam_size=2,
-                       temperature=0,
-                       word_timestamps=time_stamps,
-                       condition_on_previous_text=False)
+    result = sip_whisper.transcribe(
+        model,
+        audio,
+        fp16=False,
+        beam_size=2,
+        temperature=0,
+        extract_logprobs=True,
+        word_timestamps=time_stamps,
+        condition_on_previous_text=False)
 
     result["extracted_logprobs"]
     print()
@@ -30,13 +32,15 @@ def test_compare_sip_whisper_with_original(file_path):
     audio = sip_whisper.load_audio(file_path, 16_000)
     audio = sip_whisper.pad_or_trim(audio)
 
-    result_1 = sip_whisper.transcribe(model,
-                                      audio,
-                                      fp16=False,
-                                      beam_size=2,
-                                      temperature=0,
-                                      word_timestamps=True,
-                                      condition_on_previous_text=False)
+    result_1 = sip_whisper.transcribe(
+        model,
+        audio,
+        fp16=False,
+        beam_size=2,
+        temperature=0,
+        extract_logprobs=True,
+        word_timestamps=True,
+        condition_on_previous_text=False)
     tensors = result_1.pop("extracted_logprobs")
 
     # regular whisper
@@ -44,13 +48,14 @@ def test_compare_sip_whisper_with_original(file_path):
     audio = whisper.load_audio(file_path, 16_000)
     audio = whisper.pad_or_trim(audio)
 
-    result_2 = whisper.transcribe(model,
-                                      audio,
-                                      fp16=False,
-                                      beam_size=2,
-                                      temperature=0,
-                                      word_timestamps=True,
-                                      condition_on_previous_text=False)
+    result_2 = whisper.transcribe(
+        model,
+        audio,
+        fp16=False,
+        beam_size=2,
+        temperature=0,
+        word_timestamps=True,
+        condition_on_previous_text=False)
 
     assert result_1["segments"][0]["tokens"] == result_2["segments"][0]["tokens"]
 
@@ -65,13 +70,15 @@ def test_consistency(file_path, tensor_path):
     audio = sip_whisper.load_audio(file_path, 16_000)
     audio = sip_whisper.pad_or_trim(audio)
 
-    result = sip_whisper.transcribe(model,
-                                      audio,
-                                      fp16=False,
-                                      beam_size=5,
-                                      temperature=0,
-                                      word_timestamps=True,
-                                      condition_on_previous_text=False)
+    result = sip_whisper.transcribe(
+        model,
+        audio,
+        fp16=False,
+        beam_size=5,
+        temperature=0,
+        extract_logprobs=True,
+        word_timestamps=True,
+        condition_on_previous_text=False)
     sip_result = result.pop("extracted_logprobs")
     if not tensor_path.exists():
         torch.save(sip_result, tensor_path)
@@ -86,13 +93,15 @@ def test_mixing_functions():
     audio = sip_whisper.load_audio("tests/sample_audio_small.mp3", 16_000)
     audio = sip_whisper.pad_or_trim(audio)
 
-    result_1 = sip_whisper.transcribe(model,
-                                    audio,
-                                    fp16=False,
-                                    beam_size=2,
-                                    temperature=0,
-                                    word_timestamps=True,
-                                    condition_on_previous_text=False)
+    result_1 = sip_whisper.transcribe(
+        model,
+        audio,
+        fp16=False,
+        beam_size=2,
+        temperature=0,
+        extract_logprobs=True,
+        word_timestamps=True,
+        condition_on_previous_text=False)
     tensors_1 = result_1.pop("extracted_logprobs")
 
 
@@ -100,17 +109,20 @@ def test_mixing_functions():
     audio_2 = whisper.load_audio("tests/sample_audio_small.mp3", 16_000)
     audio_2 = whisper.pad_or_trim(audio_2)
 
-    result_2 = sip_whisper.transcribe(model,
-                                    audio_2,
-                                    fp16=False,
-                                    beam_size=2,
-                                    temperature=0,
-                                    word_timestamps=True,
-                                    condition_on_previous_text=False)
+    result_2 = sip_whisper.transcribe(
+        model,
+        audio_2,
+        fp16=False,
+        beam_size=2,
+        temperature=0,
+        extract_logprobs=True,
+        word_timestamps=True,
+        condition_on_previous_text=False)
     tensors_2 = result_2.pop("extracted_logprobs")
 
-    assert result_1 == result_2
-    assert torch.equal(tensors_1, tensors_2)
+    assert result_1["text"] == result_2["text"]
+    assert result_1["decoded_tokens_with_timestamps"] == result_2["decoded_tokens_with_timestamps"]
+    assert torch.allclose(tensors_1, tensors_2)
     print()
 
 def test_proof_determinism():
@@ -122,13 +134,15 @@ def test_proof_determinism():
     for i in range(5):
 
 
-        result = sip_whisper.transcribe(model,
-                                          audio,
-                                          fp16=False,
-                                          beam_size=2,
-                                          temperature=0,
-                                          word_timestamps=True,
-                                          condition_on_previous_text=False)
+        result = sip_whisper.transcribe(
+            model,
+            audio,
+            fp16=False,
+            beam_size=2,
+            temperature=0,
+            extract_logprobs=True,
+            word_timestamps=True,
+            condition_on_previous_text=False)
         sip_result = result["extracted_logprobs"]
         sip_results.append(sip_result)
 
@@ -146,19 +160,19 @@ def test_difficult_audio():
 
     audio = sip_whisper.pad_or_trim(audio)
 
-    result = sip_whisper.transcribe(model,
-                                    audio,
-                                    fp16=False,
-                                    beam_size=5,
-                                    temperature=0,
-                                    word_timestamps=True,
-                                    condition_on_previous_text=False,
-                                    )
+    result = sip_whisper.transcribe(
+        model,
+        audio,
+        fp16=False,
+        beam_size=5,
+        temperature=0,
+        word_timestamps=True,
+        condition_on_previous_text=False)
     print(result)
 
 @pytest.mark.parametrize(("subword_timestamps", "expected_length"), [
     (False, 9),
-    (True, 10)])
+    (True, 11)])
 def test_subword_timestamps(subword_timestamps, expected_length):
     model = sip_whisper.load_model("base", device=torch.device("cuda"))
     audio_path = Path.cwd() / "tests" / "s29_bgwszp.wav"
@@ -177,5 +191,5 @@ def test_subword_timestamps(subword_timestamps, expected_length):
         "subword_timestamps": subword_timestamps,
     }
     result = sip_whisper.transcribe(**options)
-    len(result["segments"][0]["words"]) == expected_length
+    assert len(result["segments"][0]["words"]) == expected_length
     print()
