@@ -1042,8 +1042,8 @@ class DecodingTask:
                                      self.decoder.bundle["logprobs_per_partial_sequence"],
                                      )
         else:
-            i = (self.decoder.logprobs.argmax(dim=1) == tokenizer.eot).nonzero(as_tuple=True)[0].item()
-            sip_result = self.decoder.logprobs[:i]
+            #greedy decoder
+            sip_result = self.decoder.logprobs[:len(tokens[0])]
             assert len(sip_result) == len(tokens[0])
 
         sum_logprobs: List[float] = [lp[i] for i, lp in zip(selected, sum_logprobs)]
