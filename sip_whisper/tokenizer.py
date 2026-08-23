@@ -309,10 +309,14 @@ class Tokenizer:
         return words, word_tokens
 
     def split_tokens_on_spaces(self, tokens: List[int], subword_timestamps: bool = False):
-        subwords, subword_tokens_list = self.split_tokens_on_unicode(tokens)
         if subword_timestamps:
             # dont combine subwords into words!
+            # set tokens to [13496, 4186, 241, 365, 277, 4949, 2321] to explore why this makes a difference with some asian languages
+            subword_tokens_list = [[t] for t in tokens]
+            subwords = [self.decode_with_timestamps([t]) for t in tokens]
             return subwords, subword_tokens_list
+
+        subwords, subword_tokens_list = self.split_tokens_on_unicode(tokens)
 
         words = []
         word_tokens = []
