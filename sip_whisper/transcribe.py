@@ -56,6 +56,7 @@ def transcribe(
     extract_logprobs: bool = False,
     break_after_first_segment: bool = False,
     subword_timestamps: bool = False,
+    forced_alignment_options: dict| None = None,
     **decode_options,
 
 ):
@@ -201,7 +202,7 @@ def transcribe(
             else:
                 # disable best_of when t == 0
                 kwargs.pop("best_of", None)
-
+            kwargs.update({"forced_alignment_options": forced_alignment_options})
             options = DecodingOptions(**kwargs, temperature=t)
             decode_result, sip_result_ = model.decode(segment, options)
 

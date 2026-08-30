@@ -62,13 +62,13 @@ def extract_correct_logprobs(
     final_token_sequence = final_token_sequence[0]
 
     # method doesn't work if an unfinished sequence was chosen later as best sequence. keep for now, might not be worth fixing
-    if prev_hypo_of_final_selection:
-        result1 = method_1(logprobs, source_indices, prev_hypo_of_final_selection, final_token_sequence, hypotheses_per_step)
+    #if prev_hypo_of_final_selection:
+    #    result1 = method_1(logprobs, source_indices, prev_hypo_of_final_selection, final_token_sequence, hypotheses_per_step)
 
     result2 = method_2(final_token_sequence, logprobs_per_partial_sequence)
 
-    if prev_hypo_of_final_selection:
-        assert torch.equal(result1, result2), "Results are not equal"
+    #if prev_hypo_of_final_selection:
+        #assert torch.equal(result1, result2), "Results are not equal"
 
     return result2
 
@@ -250,6 +250,7 @@ class DecodingOptions:
     # implementation details
     fp16: bool = True  # use fp16 for most of the calculation
 
+    forced_alignment_options: dict|None = None
 
 @dataclass(frozen=True)
 class DecodingResult:
@@ -355,7 +356,12 @@ class TokenDecoder:
         """Initialize any stateful variables for decoding a new sequence"""
 
     def update(
-            self, tokens: Tensor, logits: Tensor, sum_logprobs: Tensor, step: int, sample_begin: int,
+            self, tokens: Tensor,
+            logits: Tensor,
+            sum_logprobs: Tensor,
+            step: int,
+            sample_begin: int,
+            forced_alignment_options: dict|None
     ) -> Tuple[Tensor, bool]:
         """Specify how to select the next token, based on the current trace and logits
 
@@ -447,7 +453,7 @@ class GreedyDecoder(TokenDecoder):
         self.logprobs: None|torch.Tensor = None
 
     def update(
-        self, tokens: Tensor, logits: Tensor, sum_logprobs: Tensor, step: int, sample_begin: int,
+        self, tokens: Tensor, logits: Tensor, sum_logprobs: Tensor, step: int, sample_begin: int, forced_alignment_options: dict|None
     ) -> Tuple[Tensor, bool]:
         if self.temperature == 0:
             next_tokens = logits.argmax(dim=-1)
@@ -522,7 +528,7 @@ class BeamSearchDecoder(TokenDecoder):
         self.finished_sequences = None
 
     def update(
-        self, tokens: Tensor, logits: Tensor, sum_logprobs: Tensor, step: int = None, sample_begin = None
+        self, tokens: Tensor, logits: Tensor, sum_logprobs: Tensor, step: int, sample_begin: int, forced_alignment_options: dict|None
     ) -> Tuple[Tensor, bool]:
         if tokens.shape[0] % self.beam_size != 0:
             raise ValueError(f"{tokens.shape}[0] % {self.beam_size} != 0")
@@ -532,44 +538,63 @@ class BeamSearchDecoder(TokenDecoder):
             self.finished_sequences = [{} for _ in range(n_audio)]
 
         logprobs = F.log_softmax(logits.float(), dim=-1)
-        self.bundle["logprobs"].append(logprobs) #method 1, save logprobs of each partial sequence for later
+        #self.bundle["logprobs"].append(logprobs) #method 1, save logprobs of each partial sequence for later
         next_tokens, source_indices, finished_sequences = [], [], []
         for i in range(n_audio):
             scores, sources, finished = {}, {}, {}
+            if forced_alignment_options is None or forced_alignment_options["position"]!=step:
+                # STEP 1: calculate the cumulative log probabilities for possible candidates
+                for j in range(self.beam_size):
+                    idx = i * self.beam_size + j
+                    prefix = tokens[idx].tolist()
+                    for logprob, token in zip(*logprobs[idx].topk(self.beam_size + 1)):
+                        new_logprob = (sum_logprobs[idx] + logprob).item()
+                        sequence = tuple(prefix + [token.item()])
+                        scores[sequence] = new_logprob
+                        sources[sequence] = idx
 
-            # STEP 1: calculate the cumulative log probabilities for possible candidates
-            for j in range(self.beam_size):
-                idx = i * self.beam_size + j
-                prefix = tokens[idx].tolist()
-                for logprob, token in zip(*logprobs[idx].topk(self.beam_size + 1)):
-                    new_logprob = (sum_logprobs[idx] + logprob).item()
-                    sequence = tuple(prefix + [token.item()])
-                    scores[sequence] = new_logprob
-                    sources[sequence] = idx
+                # STEP 2: rank the candidates and keep the top beam_size sequences for each audio
+                saved = 0
+                for sequence in sorted(scores, key=scores.get, reverse=True):
+                    self.bundle["logprobs_per_partial_sequence"][sequence[sample_begin:]] = logprobs[sources[sequence]] #method 2, save logporbs for each partial sequence
+                    if sequence[-1] == self.eot:
+                        finished[sequence] = scores[sequence]
+                        #self.bundle["prev_hypo"][sequence] = sources[sequence] # method 1, remember parent of a finished sequence
 
-            # STEP 2: rank the candidates and keep the top beam_size sequences for each audio
-            saved = 0
-            for sequence in sorted(scores, key=scores.get, reverse=True):
-                self.bundle["logprobs_per_partial_sequence"][sequence[sample_begin:]] = logprobs[sources[sequence]] #method 2, save logporbs for each partial sequence
-                if sequence[-1] == self.eot:
-                    finished[sequence] = scores[sequence]
-                    self.bundle["prev_hypo"][sequence] = sources[sequence] # method 1, remember parent of a finished sequence
+                    else:
+                        sum_logprobs[len(next_tokens)] = scores[sequence]
+                        next_tokens.append(sequence)
+                        source_indices.append(sources[sequence])
 
-                else:
-                    sum_logprobs[len(next_tokens)] = scores[sequence]
-                    next_tokens.append(sequence)
-                    source_indices.append(sources[sequence])
+                        saved += 1
+                        if saved == self.beam_size:
+                            break
+            else:
+                forced_token_id: int = forced_alignment_options["token_id_or_word"]
+                logprobs_for_forced_token = logprobs[:,forced_token_id]
+                assert logprobs_for_forced_token.shape[0] == self.beam_size
 
-                    saved += 1
-                    if saved == self.beam_size:
-                        break
+                sum_logprobs.add_(logprobs_for_forced_token) # use in-place addition to not add another return value (in the regular flow it's also done in-place)
+                #sum_logprobs = sum_logprobs + logprobs_for_forced_token # this is not in-place, as it redefines the tensor
+
+                forced_tokens_vector = torch.full(size=(self.beam_size, 1), fill_value=forced_token_id).to(tokens.device)
+                next_tokens = torch.hstack([tokens, forced_tokens_vector])
+
+                for i, sequence in enumerate(next_tokens): #sequences are not sorted by logprobs here, which is; i corresponds to logprobs perfectly
+                    sequence = tuple(sequence[sample_begin:].tolist())
+                    self.bundle["logprobs_per_partial_sequence"][sequence] = logprobs[i]
+
+                # sequences are ordered here, this might not be necessary, but is done in the usual workflow as well.
+                # If not sorting would be applied, source_indices would simply be range(tokens)
+                values, source_indices = sum_logprobs.sort(descending=True)
+                next_tokens = next_tokens[source_indices]
 
             finished_sequences.append(finished)
 
-        self.bundle["source_indices"].append(source_indices) # method 1, remember which new hypo stems from which old hypo
+        #self.bundle["source_indices"].append(source_indices) # method 1, remember which new hypo stems from which old hypo
 
         tokens = torch.tensor(next_tokens, device=tokens.device)
-        self.bundle["tokens"].append(tokens) # method 1
+        #self.bundle["tokens"].append(tokens) # method 1
 
         self.inference.rearrange_kv_cache(source_indices)
 
@@ -839,6 +864,14 @@ class DecodingTask:
                 )
             )
 
+        # convert into token if necessary
+        if options.forced_alignment_options is not None:
+            options.forced_alignment_options["position"]+=1 # consider timestamp token
+            if not isinstance(options.forced_alignment_options["token_id_or_word"], int):
+                vocab = self.tokenizer.encoding._mergeable_ranks
+                options.forced_alignment_options["token_id_or_word"] = vocab[bytes(options.forced_alignment_options["token_id_or_word"], "utf8")]
+        self.forced_alignment_options: dict|None = options.forced_alignment_options
+
     def _verify_options(self, options: DecodingOptions) -> DecodingOptions:
         if options.beam_size is not None and options.best_of is not None:
             raise ValueError("beam_size and best_of can't be given together")
@@ -947,7 +980,7 @@ class DecodingTask:
 
         return languages, lang_probs
 
-    def _main_loop(self, audio_features: Tensor, tokens: Tensor):
+    def _main_loop(self, audio_features: Tensor, tokens: Tensor, forced_alignment_options: dict|None):
         n_batch = tokens.shape[0]
         sum_logprobs: Tensor = torch.zeros(n_batch, device=audio_features.device)
         no_speech_probs = [np.nan] * n_batch
@@ -970,7 +1003,13 @@ class DecodingTask:
                     logit_filter.apply(logits, tokens)
 
                 # expand the tokens tensor with the selected next tokens
-                tokens, completed = self.decoder.update(tokens, logits, sum_logprobs, step=i, sample_begin=self.sample_begin)
+                tokens, completed = self.decoder.update(
+                    tokens,
+                    logits,
+                    sum_logprobs,
+                    step=i,
+                    sample_begin=self.sample_begin,
+                    forced_alignment_options=forced_alignment_options)
 
                 if completed or tokens.shape[-1] > self.n_ctx:
                     break
@@ -1004,7 +1043,7 @@ class DecodingTask:
         tokens = tokens.repeat_interleave(self.n_group, dim=0).to(audio_features.device)
 
         # call the main sampling loop
-        tokens, sum_logprobs, no_speech_probs = self._main_loop(audio_features, tokens)
+        tokens, sum_logprobs, no_speech_probs = self._main_loop(audio_features, tokens, self.forced_alignment_options)
 
         # reshape the tensors to have (n_audio, n_group) as the first two dimensions
         audio_features = audio_features[:: self.n_group]
