@@ -216,3 +216,32 @@ def test_greedy_decoder():
     # note: len(result['decoded_tokens_with_timestamps']) is now varying due to temperature
     assert isinstance(result["extracted_logprobs"], torch.Tensor)
     assert len(result['extracted_logprobs']) == len(result["decoded_tokens_with_timestamps"])
+
+
+def test_single_beam():
+    model = sip_whisper.load_model("base", device=torch.device("cuda"))
+    audio_path = Path.cwd() / "tests" / "s29_bgwszp.wav"
+    audio = sip_whisper.load_audio(str(audio_path))
+    audio = sip_whisper.pad_or_trim(audio)
+
+    options = {
+        "model": model,
+        "audio": audio,
+        "fp16": False,
+        "beam_size": 1,
+        "temperature": 0,
+        "extract_logprobs": True,
+        "word_timestamps": False,
+        "condition_on_previous_text": False,
+        "language": "en",
+        "subword_timestamps": True,
+    }
+    result = sip_whisper.transcribe(**options)
+    # note: len(result['decoded_tokens_with_timestamps']) is now varying due to temperature
+    assert isinstance(result["extracted_logprobs"], torch.Tensor)
+    assert len(result['extracted_logprobs']) == len(result["decoded_tokens_with_timestamps"])
+
+    # check if tokens match -> if logprob extraction is ok
+    indices = torch.argmax(result["extracted_logprobs"], dim=1).tolist()
+    assert indices == result["segments"][0]["tokens"]
+    print()
