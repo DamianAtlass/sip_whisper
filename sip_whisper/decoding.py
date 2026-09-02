@@ -521,41 +521,58 @@ class BeamSearchDecoder(TokenDecoder):
         n_audio = tokens.shape[0] // self.beam_size
         if self.finished_sequences is None:  # for the first update
             self.finished_sequences = [{} for _ in range(n_audio)]
-        if forced_alignment_options and forced_alignment_options["position"]==step:
-            logprobs = torch.full(size=logits.shape, fill_value=float("-inf")).to(logits.device)
-            logprobs[:, forced_alignment_options["token_id_or_word"]] = 0
-        else:
-            #regular path
-            logprobs = F.log_softmax(logits.float(), dim=-1)
+        logprobs = F.log_softmax(logits.float(), dim=-1)
 
         next_tokens, source_indices, finished_sequences = [], [], []
         for i in range(n_audio):
             scores, sources, finished = {}, {}, {}
-            # STEP 1: calculate the cumulative log probabilities for possible candidates
-            for j in range(self.beam_size):
-                idx = i * self.beam_size + j
-                prefix = tokens[idx].tolist()
-                for logprob, token in zip(*logprobs[idx].topk(self.beam_size + 1)):
-                    new_logprob = (sum_logprobs[idx] + logprob).item()
-                    sequence = tuple(prefix + [token.item()])
-                    scores[sequence] = new_logprob
-                    sources[sequence] = idx
+            if not (forced_alignment_options and forced_alignment_options["position"]==step):
+                # STEP 1: calculate the cumulative log probabilities for possible candidates
+                for j in range(self.beam_size):
+                    idx = i * self.beam_size + j
+                    prefix = tokens[idx].tolist()
+                    for logprob, token in zip(*logprobs[idx].topk(self.beam_size + 1)):
+                        new_logprob = (sum_logprobs[idx] + logprob).item()
+                        sequence = tuple(prefix + [token.item()])
+                        scores[sequence] = new_logprob
+                        sources[sequence] = idx
 
-            # STEP 2: rank the candidates and keep the top beam_size sequences for each audio
-            saved = 0
-            for sequence in sorted(scores, key=scores.get, reverse=True):
-                self.bundle["logprobs_per_partial_sequence"][sequence[sample_begin:]] = logprobs[sources[sequence]] #method 2, save logporbs for each partial sequence
-                if sequence[-1] == self.eot:
-                    finished[sequence] = scores[sequence]
+                # STEP 2: rank the candidates and keep the top beam_size sequences for each audio
+                saved = 0
+                for sequence in sorted(scores, key=scores.get, reverse=True):
+                    self.bundle["logprobs_per_partial_sequence"][sequence[sample_begin:]] = logprobs[sources[sequence]] #method 2, save logporbs for each partial sequence
+                    if sequence[-1] == self.eot:
+                        finished[sequence] = scores[sequence]
 
-                else:
-                    sum_logprobs[len(next_tokens)] = scores[sequence]
-                    next_tokens.append(sequence)
-                    source_indices.append(sources[sequence])
+                    else:
+                        sum_logprobs[len(next_tokens)] = scores[sequence]
+                        next_tokens.append(sequence)
+                        source_indices.append(sources[sequence])
 
-                    saved += 1
-                    if saved == self.beam_size:
-                        break
+                        saved += 1
+                        if saved == self.beam_size:
+                            break
+
+            else:
+                forced_token_id: int = forced_alignment_options["token_id_or_word"]
+                logprobs_for_forced_token = logprobs[:, forced_token_id]
+                assert logprobs_for_forced_token.shape[0] == self.beam_size
+
+                sum_logprobs.add_(logprobs_for_forced_token)  # use in-place addition to not add another return value (in the regular flow it's also done in-place)
+                # sum_logprobs = sum_logprobs + logprobs_for_forced_token # this is not in-place, as it redefines the tensor
+
+                forced_tokens_vector = torch.full(size=(self.beam_size, 1), fill_value=forced_token_id).to(tokens.device)
+                next_tokens = torch.hstack([tokens, forced_tokens_vector])
+
+                for i, sequence in enumerate(
+                        next_tokens):  # sequences are not sorted by logprobs here, which is; i corresponds to logprobs perfectly
+                    sequence = tuple(sequence[sample_begin:].tolist())
+                    self.bundle["logprobs_per_partial_sequence"][sequence] = logprobs[i]
+
+                # sequences are ordered here, this might not be necessary, but is done in the usual workflow as well.
+                # If not sorting would be applied, source_indices would simply be range(tokens)
+                values, source_indices = sum_logprobs.sort(descending=True)
+                next_tokens = next_tokens[source_indices].tolist()
 
             finished_sequences.append(finished)
 

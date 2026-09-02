@@ -6,14 +6,14 @@ from pathlib import Path
 test_folder = Path.cwd() / "tests" if Path.cwd().name != "tests" else Path.cwd()
 clean_audio_path = test_folder / "SNR40_s21_bgir5s.wav"
 
+model = sip_whisper.load_model("large-v3-turbo", device=torch.device("cuda"))
 @pytest.mark.parametrize(("forced_alignment_options", "result_text"), (
-        #[None, " been green in R5 soon."],
-        #[{"position": 1, "token_id_or_word": 1500}, " been testable in R5 soon."], #30000  = ' test'
-        #[{"position": 3, "token_id_or_word": 30000}, " been green in kilos five soon."], #30000  = ' kilos'
+        [None, " been green in R5 soon."],
+        [{"position": 1, "token_id_or_word": 1500}, " been testable in R5 soon."], #30000  = ' test'
+        [{"position": 3, "token_id_or_word": 30000}, " been green in kilos five soon."], #30000  = ' kilos'
         [{"position": 1, "token_id_or_word": " blue"}, " been blue in R5 soon."],  # 30000  = ' kilos'
 ))
 def test_forced_alignment(forced_alignment_options: dict, result_text):
-    model = sip_whisper.load_model("large-v3-turbo", device=torch.device("cuda"))
     audio_path = Path.cwd() / "SNR40_s21_bgir5s.wav"
     audio = sip_whisper.load_audio(str(audio_path))
     audio = sip_whisper.pad_or_trim(audio)
